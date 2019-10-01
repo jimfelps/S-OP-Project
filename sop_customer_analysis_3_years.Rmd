@@ -1,0 +1,277 @@
+---
+title: "S&OP Customer Analysis"
+author: "Jim Felps"
+date: "9/19/2019"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+pa_type <- c("Engineering Hours", "Project Manager Hours", "Engineering Contract")
+order_status <- c("BOOKED", "CLOSED")
+
+ma_table_20160701_20190630 <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/ma_table_20160701_20190630.csv", 
+    col_types = cols(HISTORY_DATE = col_date(format = "%m/%d/%Y"), 
+        ORDER_NUMBER = col_character()))
+
+pa_expenditures_20160701_20190630 <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/pa_expenditures_20160701_20190630.csv", 
+    col_types = cols(CUSTOMER_NUMBER = col_character(), 
+        EXPENDITURE_ENDING_DATE = col_date(format = "%m/%d/%Y"), 
+        EXPENDITURE_ITEM_DATE = col_date(format = "%m/%d/%Y"), 
+        ORDER_NUMBER = col_character(), PROJECT_NUMBER = col_character()))
+
+ship_date <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/Ship Date.csv", 
+    col_types = cols(`Order Number` = col_character(), 
+        `Shipped Date` = col_date(format = "%m/%d/%Y")))
+
+customer_data <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/Customer Data.csv", 
+    col_types = cols(`Order Close Date` = col_date(format = "%m/%d/%Y"), 
+        `Order Creation Date` = col_date(format = "%m/%d/%Y"), 
+        `Order Number` = col_character(), 
+        `Ship AC Date` = col_date(format = "%m/%d/%Y")))
+
+```
+
+
+
+Next it's time to clean data. First go 'round on this process was a bit messy. I'd like to clean the source data before getting into the formatting. After that, I'll create lookup tables from the additional data (ship_date, customer_data, pa_expentitures) to add onto the MA table data. Once that's complete, I can build a summary by order that will include customer, project and order information by fiscal year. I'll use that table to create a classic/FT lookup so that any project that is a classic type project will be assigned as a C2/FT since we'll need this type of info when we get into engineering capacity work but won't be able to tell based on the number of engineering hours (they'll be mixed in with the simple complexity work). From there I'll create a project summary table in two views: with a "primary key" and without. When we get down to this summary level, I don't think we'll actually need the key, but all it is is the first 8 digits of the order number that 
+should tie projects together, but we know that isn't the case based on the variance in observations between the two tables. I think the table with key is probably worthless, but we'll keep it just in case.
+
+
+```{r}
+ma_table_3_years <- ma_table_20160701_20190630 %>%
+  filter(ORDER_STATUS %in% order_status,
+         REGION != "CNBC",
+         !is.na(CUSTOMER_NAME))
+
+ma_table_3_years$history_month <- month(ma_table_3_years$HISTORY_DATE)
+ma_table_3_years$history_year <- year(ma_table_3_years$HISTORY_DATE)
+
+ma_table_3_years$fiscal_year <- if_else(ma_table_3_years$history_month >= 7 & ma_table_3_years$history_month <= 12, 
+                                        ma_table_3_years$history_year + 1, 
+                                        ma_table_3_years$history_year)
+
+# Now I want to add a fiscal year to the Oracle projects data. Similar method to the MA table addition
+
+pa_expenditures_20160701_20190630$expenditure_month <- month(pa_expenditures_20160701_20190630$EXPENDITURE_ITEM_DATE)
+pa_expenditures_20160701_20190630$expenditure_year <- year(pa_expenditures_20160701_20190630$EXPENDITURE_ITEM_DATE)
+
+pa_expenditures_20160701_20190630$fiscal_year <- if_else(pa_expenditures_20160701_20190630$expenditure_month >= 7 & 
+                                                         pa_expenditures_20160701_20190630$expenditure_month <= 12, 
+                                                         pa_expenditures_20160701_20190630$expenditure_year + 1,
+                                                         pa_expenditures_20160701_20190630$expenditure_year)
+
+# add FY to the ship date file
+
+ship_date$ship_month <- month(ship_date$`Shipped Date`)
+ship_date$ship_year <- year(ship_date$`Shipped Date`)
+
+ship_date$fiscal_year <- if_else(ship_date$ship_month >= 7 & 
+                                 ship_date$ship_month<= 12, 
+                                 ship_date$ship_year + 1,
+                                 ship_date$ship_year)
+
+# create table with shipped tons by order by fiscal year
+shipped_date_tons_fy <- ship_date %>%
+  group_by(`Order Number`, fiscal_year) %>%
+  summarise(total_tons = round(sum(`Shipped Tons`),2),
+            buyout_tons = round(sum(`Shipped Tons (External)`),2),
+            ship_date = max(`Shipped Date`)) %>%
+  mutate(bbna_tons = total_tons - buyout_tons) %>%
+  ungroup()
+
+# use Ben's customer data file to create table with additional info needed
+order_create_date <- customer_data %>%
+  group_by(`Order Number`) %>%
+  summarise(creation_date = max(`Order Creation Date`))
+
+# create a ship to state lookup from the customer data file from Ben
+ship_to_lookup <- customer_data %>%
+  count(`Project Name`, `Order Number`, `Ship To State`, `Ship To Postal Code`) %>%
+  mutate(proj_number = str_sub(`Order Number`,1,8))
+
+claims_data <- ma_table_3_years %>%
+  filter(str_detect(TRANSACTION_TYPE, "CLAIM")) %>%
+  group_by(CUSTOMER_NAME, fiscal_year, ORDER_NUMBER) %>%
+  summarise(claim_rev = round(sum(BILLED_AMOUNT),2),
+            claim_cost = round(sum(COGS_AMOUNT),2)) %>%
+  mutate(claim_amt = claim_rev - claim_cost) %>%
+  ungroup()
+
+pa_summary_by_order <- pa_expenditures_20160701_20190630 %>%
+  filter(!is.na(ORDER_NUMBER),
+         !is.na(QUANTITY),
+         !is.na(BURDEN_COST),
+         EXPENDITURE_TYPE %in% pa_type) %>%
+  group_by(CUSTOMER_NAME, CUSTOMER_NUMBER, ORDER_NUMBER, fiscal_year) %>%
+  summarise(hours = round(sum(QUANTITY),2),
+            eng_cost = round(sum(BURDEN_COST),2)) %>%
+  ungroup()
+
+
+# should be ready to create the summary by order table now...
+
+ma_summary_by_order <- ma_table_3_years %>%
+  group_by(DIVISION, REGION, CUSTOMER_NAME, CUSTOMER_NUMBER, PROJECT, ORDER_NUMBER, TRANSACTION_TYPE, fiscal_year) %>%
+  summarise(revenue = round(sum(BILLED_AMOUNT),2),
+            mat_cost = round(sum(COGS_AMOUNT),2),
+            ppv = round(sum(PUR_VAR_ACCT),2)) %>%
+  mutate(total_cost = mat_cost + ppv,
+         margin = revenue - total_cost) %>%
+  left_join(pa_summary_by_order, by = c("ORDER_NUMBER" = "ORDER_NUMBER", "fiscal_year" = "fiscal_year")) %>%
+  replace_na(list(revenue = 0, mat_cost = 0, ppv = 0, total_cost = 0, margin = 0, hours = 0, eng_cost = 0)) %>%
+  rename(customer_name = CUSTOMER_NAME.x, customer_number = CUSTOMER_NUMBER.x) %>%
+  left_join(claims_data, by = c("ORDER_NUMBER" = "ORDER_NUMBER", "fiscal_year" = "fiscal_year")) %>%
+  replace_na(list(claim_amt = 0)) %>%
+  left_join(shipped_date_tons_fy, by = c("ORDER_NUMBER" = "Order Number", "fiscal_year" = "fiscal_year")) %>%
+  replace_na(list(total_tons = 0, buyout_tons = 0, bbna_tons = 0)) %>%
+  left_join(order_create_date, by = c("ORDER_NUMBER" = "Order Number")) %>%
+  mutate(proj_number = str_sub(ORDER_NUMBER,1,8)) %>%
+  left_join(ship_to_lookup, by = c("ORDER_NUMBER" = "Order Number")) %>%
+  select(-CUSTOMER_NAME.y, -CUSTOMER_NUMBER.y, -CUSTOMER_NAME, -claim_rev, -claim_cost, -`Project Name`, -n) %>%
+  ungroup()
+
+
+# create lookup table for Fast Track and Classic 2 type buildings for engineering complexity field on the project summary data set
+# "VP/FSTRK" and "GB/CL-" are the two items to search for to detect fast track and classic type buildings.
+
+ma_summary_by_order$building_type <- if_else(str_detect(ma_summary_by_order$TRANSACTION_TYPE, "VP/FSTRK") | str_detect(ma_summary_by_order$TRANSACTION_TYPE, "GB/CL-"),                                                "CL/FSTRK",
+                                             "PEMB/OTHER")
+cl_fstrk_lookup <- ma_summary_by_order %>%
+  filter(building_type == "CL/FSTRK") %>%
+  count(PROJECT, building_type)
+
+# I'm going to exclude this code. After reviewing with Ben, there are just too many issues with the summary by project with proj_number key
+
+#ma_summary_by_project_w_key <-  ma_summary_by_order %>%
+#  group_by(DIVISION, REGION, customer_name, customer_number, PROJECT, fiscal_year, proj_number) %>%
+#  summarise(revenue = round(sum(revenue),2),
+#            cost = round(sum(total_cost),2),
+#            margin = round(sum(margin),2),
+#            hours = round(sum(hours),2),
+#            eng_cost = round(sum(eng_cost),2),
+#            claim_amt = round(sum(claim_amt),2),
+#            total_tons = round(sum(total_tons),2),
+#            buyout_tons = round(sum(buyout_tons),2),
+#            bbna_tons = round(sum(bbna_tons),2),
+#            creation_date = max(creation_date),
+#            ship_date = max(ship_date)) %>%
+#  left_join(cl_fstrk_lookup, by = c("PROJECT" = "PROJECT")) %>%
+#  left_join(ship_to_lookup, by = c("proj_number" = "proj_number")) %>%
+#  select(-cost, -n.x, -`Order Number`, -n.y) %>%
+#  replace_na(list(building_type = "PEMB/OTHER")) %>%
+#  ungroup()
+  
+
+ma_summary_by_project_wo_key <-  ma_summary_by_order %>%
+  group_by(DIVISION, REGION, customer_name, customer_number, PROJECT, fiscal_year) %>%
+  summarise(revenue = round(sum(revenue),2),
+            cost = round(sum(total_cost),2),
+            margin = round(sum(margin),2),
+            hours = round(sum(hours),2),
+            eng_cost = round(sum(eng_cost),2),
+            claim_amt = round(sum(claim_amt),2),
+            total_tons = round(sum(total_tons),2),
+            buyout_tons = round(sum(buyout_tons),2),
+            bbna_tons = round(sum(bbna_tons),2),
+            creation_date = max(creation_date),
+            ship_date = max(ship_date)) %>%
+  left_join(cl_fstrk_lookup, by = c("PROJECT" = "PROJECT")) %>%
+  select(-cost, -n) %>%
+  replace_na(list(building_type = "PEMB/OTHER")) %>%
+  ungroup()
+
+ma_summary_by_project_wo_key$eng_complexity <- if_else(ma_summary_by_project_wo_key$building_type == "CL/FSTRK", "CL/FSTRK",
+                                                       if_else(ma_summary_by_project_wo_key$hours == 0, "No Engineering",
+                                                               if_else(ma_summary_by_project_wo_key$hours <= 100, "<100 Hours",
+                                                                       if_else(ma_summary_by_project_wo_key$hours > 100 & ma_summary_by_project_wo_key$hours <= 200, "101 - 200 Hours",
+                                                                               if_else(ma_summary_by_project_wo_key$hours > 200 & ma_summary_by_project_wo_key$hours <= 400, "201 - 400 Hours",
+                                                                                       if_else(ma_summary_by_project_wo_key$hours > 400 & ma_summary_by_project_wo_key$hours <= 800, "401 - 800 Hours",
+                                                                                               if_else(ma_summary_by_project_wo_key$hours > 800, "800+ Hours", "Other")))))))
+
+#ma_summary_by_project_w_key$eng_complexity <- if_else(ma_summary_by_project_w_key$building_type == "CL/FSTRK", "CL/FSTRK",
+#                                                       if_else(ma_summary_by_project_w_key$hours == 0, "No Engineering",
+#                                                               if_else(ma_summary_by_project_w_key$hours <= 100, "<100 Hours",
+#                                                                       if_else(ma_summary_by_project_w_key$hours > 100 & ma_summary_by_project_w_key$hours <= 200, "101 - 200 Hours",
+#                                                                               if_else(ma_summary_by_project_w_key$hours > 200 & ma_summary_by_project_w_key$hours <= 400, "201 - 400 Hours",
+#                                                                                       if_else(ma_summary_by_project_w_key$hours > 400 & ma_summary_by_project_w_key$hours <= 800, "401 - 800 Hours",
+#                                                                                               if_else(ma_summary_by_project_w_key$hours > 800, "800+ Hours", "Other")))))))
+
+#ma_summary_by_project_w_key <- ma_summary_by_project_w_key %>%
+#  select(-building_type)
+ma_summary_by_project_wo_key <- ma_summary_by_project_wo_key %>%
+  select(-building_type)
+
+write.csv(ma_summary_by_order, "~/R/R Data/S&OP/customer_analysis_3_years/ma_summary_by_order.csv")
+#write.csv(ma_summary_by_project_w_key, "~/R/R Data/S&OP/customer_analysis_3_years/ma_summary_by_project_w_key.csv")
+write.csv(ma_summary_by_project_wo_key, "~/R/R Data/S&OP/customer_analysis_3_years/ma_summary_by_project_wo_key.csv")
+
+```
+
+
+Analysis
+
+```{r}
+
+# Coming soon
+
+total_measures_lookup <- ma_summary_by_project_wo_key %>%
+  filter(DIVISION != "BBNA") %>%
+  group_by(eng_complexity) %>%
+  summarise(bbna_margin = round(sum(margin),2),
+            bbna_eng_hours = round(sum(hours),2),
+            bbna_tons = round(sum(total_tons),2),)
+
+key_measures <- ma_summary_by_project_wo_key %>%
+  filter(DIVISION != "BBNA") %>%
+  group_by(DIVISION, eng_complexity) %>%
+  summarise(margin = round(sum(margin),2),
+            eng_hours = round(sum(hours),2),
+            tons = round(sum(total_tons),2),) %>%
+  left_join(total_measures_lookup, by = c("eng_complexity" = "eng_complexity")) %>%
+  mutate(margin_per_hour = round(margin/eng_hours,2),
+         eng_hours_per_ton = round(eng_hours/tons,2),
+         margin_per_ton = round(margin/tons,2),
+         pct_of_margin = round(margin/bbna_margin,2),
+         pct_of_hours = round(eng_hours/bbna_eng_hours,2),
+         pct_of_tons = round(tons/bbna_tons,2)) %>%
+  select(-bbna_margin, -bbna_eng_hours, -bbna_tons) %>%
+  ungroup()
+
+```
+
+
+I'm going to create some visuals in a new chunk to keep things clean. First round of visuals I'm going to exclude the "No Engineering" complexity piece since we're focusing on the engineering throughput right now.
+
+```{r}
+
+key_measures$eng_complexity <- factor(key_measures$eng_complexity,
+                                      levels = c("No Engineering",
+                                                 "CL/FSTRK",
+                                                 "<100 Hours",
+                                                 "101 - 200 Hours",
+                                                 "201 - 400 Hours",
+                                                 "401 - 800 Hours",
+                                                 "800+ Hours",
+                                                 "Other")) 
+
+key_measures_sans_no_eng <- key_measures %>%
+  filter(eng_complexity != "No Engineering")
+
+
+
+key_measures_sans_no_eng %>%
+  ggplot(aes(eng_complexity, margin_per_hour, fill = DIVISION)) +
+    geom_bar(stat = "Identity", position = "dodge")
+   
+```
+
