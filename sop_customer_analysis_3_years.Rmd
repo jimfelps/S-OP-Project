@@ -21,13 +21,23 @@ order_status <- c("BOOKED", "CLOSED")
 
 ma_table_20160701_20190630 <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/ma_table_20160701_20190630.csv", 
     col_types = cols(HISTORY_DATE = col_date(format = "%m/%d/%Y"), 
-        ORDER_NUMBER = col_character()))
+        ORDER_NUMBER = col_character(), WEIGHT = col_number()))
+ma_table_201320701_20160630 <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/ma_table_201320701_20160630.csv", 
+    col_types = cols(HISTORY_DATE = col_date(format = "%m/%d/%Y"), 
+        ORDER_NUMBER = col_character(), WEIGHT = col_number()))
 
 pa_expenditures_20160701_20190630 <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/pa_expenditures_20160701_20190630.csv", 
     col_types = cols(CUSTOMER_NUMBER = col_character(), 
         EXPENDITURE_ENDING_DATE = col_date(format = "%m/%d/%Y"), 
         EXPENDITURE_ITEM_DATE = col_date(format = "%m/%d/%Y"), 
-        ORDER_NUMBER = col_character(), PROJECT_NUMBER = col_character()))
+        ORDER_NUMBER = col_character(), PROJECT_NUMBER = col_character(),
+        EMPLOYEE_NUMBER = col_character()))
+pa_expenditures_20120101_20160630 <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/pa_expenditures_20120101_20160630.csv", 
+    col_types = cols(CUSTOMER_NUMBER = col_character(), 
+        EXPENDITURE_ENDING_DATE = col_date(format = "%m/%d/%Y"), 
+        EXPENDITURE_ITEM_DATE = col_date(format = "%m/%d/%Y"), 
+        ORDER_NUMBER = col_character(), PROJECT_NUMBER = col_character(),
+        EMPLOYEE_NUMBER = col_character()))
 
 ship_date <- read_csv("~/R/R Data/S&OP/customer_analysis_3_years/Ship Date.csv", 
     col_types = cols(`Order Number` = col_character(), 
@@ -48,27 +58,29 @@ should tie projects together, but we know that isn't the case based on the varia
 
 
 ```{r}
-ma_table_3_years <- ma_table_20160701_20190630 %>%
+ma_table_combine <- bind_rows(ma_table_201320701_20160630, ma_table_20160701_20190630)
+pa_table_combine <- bind_rows(pa_expenditures_20120101_20160630, pa_expenditures_20160701_20190630)
+ma_table_6_years <- ma_table_combine %>%
   filter(ORDER_STATUS %in% order_status,
          REGION != "CNBC",
          !is.na(CUSTOMER_NAME))
 
-ma_table_3_years$history_month <- month(ma_table_3_years$HISTORY_DATE)
-ma_table_3_years$history_year <- year(ma_table_3_years$HISTORY_DATE)
+ma_table_6_years$history_month <- month(ma_table_6_years$HISTORY_DATE)
+ma_table_6_years$history_year <- year(ma_table_6_years$HISTORY_DATE)
 
-ma_table_3_years$fiscal_year <- if_else(ma_table_3_years$history_month >= 7 & ma_table_3_years$history_month <= 12, 
-                                        ma_table_3_years$history_year + 1, 
-                                        ma_table_3_years$history_year)
+ma_table_6_years$fiscal_year <- if_else(ma_table_6_years$history_month >= 7 & ma_table_6_years$history_month <= 12, 
+                                        ma_table_6_years$history_year + 1, 
+                                        ma_table_6_years$history_year)
 
 # Now I want to add a fiscal year to the Oracle projects data. Similar method to the MA table addition
 
-pa_expenditures_20160701_20190630$expenditure_month <- month(pa_expenditures_20160701_20190630$EXPENDITURE_ITEM_DATE)
-pa_expenditures_20160701_20190630$expenditure_year <- year(pa_expenditures_20160701_20190630$EXPENDITURE_ITEM_DATE)
+pa_table_combine$expenditure_month <- month(pa_table_combine$EXPENDITURE_ITEM_DATE)
+pa_table_combine$expenditure_year <- year(pa_table_combine$EXPENDITURE_ITEM_DATE)
 
-pa_expenditures_20160701_20190630$fiscal_year <- if_else(pa_expenditures_20160701_20190630$expenditure_month >= 7 & 
-                                                         pa_expenditures_20160701_20190630$expenditure_month <= 12, 
-                                                         pa_expenditures_20160701_20190630$expenditure_year + 1,
-                                                         pa_expenditures_20160701_20190630$expenditure_year)
+pa_table_combine$fiscal_year <- if_else(pa_table_combine$expenditure_month >= 7 & 
+                                                         pa_table_combine$expenditure_month <= 12, 
+                                                         pa_table_combine$expenditure_year + 1,
+                                                         pa_table_combine$expenditure_year)
 
 # add FY to the ship date file
 
@@ -99,7 +111,7 @@ ship_to_lookup <- customer_data %>%
   count(`Project Name`, `Order Number`, `Ship To State`, `Ship To Postal Code`) %>%
   mutate(proj_number = str_sub(`Order Number`,1,8))
 
-claims_data <- ma_table_3_years %>%
+claims_data <- ma_table_6_years %>%
   filter(str_detect(TRANSACTION_TYPE, "CLAIM")) %>%
   group_by(CUSTOMER_NAME, fiscal_year, ORDER_NUMBER) %>%
   summarise(claim_rev = round(sum(BILLED_AMOUNT),2),
@@ -107,7 +119,7 @@ claims_data <- ma_table_3_years %>%
   mutate(claim_amt = claim_rev - claim_cost) %>%
   ungroup()
 
-pa_summary_by_order <- pa_expenditures_20160701_20190630 %>%
+pa_summary_by_order <- pa_table_combine %>%
   filter(!is.na(ORDER_NUMBER),
          !is.na(QUANTITY),
          !is.na(BURDEN_COST),
@@ -120,7 +132,7 @@ pa_summary_by_order <- pa_expenditures_20160701_20190630 %>%
 
 # should be ready to create the summary by order table now...
 
-ma_summary_by_order <- ma_table_3_years %>%
+ma_summary_by_order <- ma_table_6_years %>%
   group_by(DIVISION, REGION, CUSTOMER_NAME, CUSTOMER_NUMBER, PROJECT, ORDER_NUMBER, TRANSACTION_TYPE, fiscal_year) %>%
   summarise(revenue = round(sum(BILLED_AMOUNT),2),
             mat_cost = round(sum(COGS_AMOUNT),2),
