@@ -1,3 +1,5 @@
+rm(list = ls(all.names = TRUE))
+
 library(tidyverse)
 library(lubridate)
 library(readxl)
@@ -93,7 +95,7 @@ mat_backlog <- backlog_tons_detail %>% mutate(proj_num = str_sub(`Order Number`,
 # as well as an engineering status
 
 colnames(eng_master2)[2] <- "Order"
-colnames(mat_backlog)[5] <- "Order"
+colnames(mat_backlog)[7] <- "Order"
 
 mat_backlog_w_eng <- merge(mat_backlog, eng_master2, by = "Order", all.x = TRUE)
 
@@ -114,20 +116,37 @@ mat_backlog_w_eng$eng_status[no_val] <- "MFG"
 
 
 
-mat_backlog_w_eng2 <- mat_backlog_w_eng %>%
-  select(1:13,17,22:25) %>%
-  replace_na(list(`Budget Hours` = 0, `Actual Hours` = 0, `Engineering Amt` = 0)) %>%
-  group_by(Order, Bucket, Division, Region, `Customer Name`, `Project Name`, `Transaction Type`, Complexity) %>%
-  summarise(tons = round(sum(`Total Tons`),2),
-            revenue = round(sum(`Backlog Dollars`),2),
-            margin = round(sum(`Margin with Exch Rate`),2),
-            budget_hrs = round(mean(`Budget Hours`),2),
-            actual_hrs_maybe = round(mean(`Actual Hours`),2),
-            eng_amt_whatdoesthismean = round(mean(`Engineering Amt`),2)) %>%
-  left_join(pa_exp_all_summary, by = c("Order" = "ORDER_NUMBER")) %>%
-  replace_na(list(quantity = 0, cost = 0))
+#mat_backlog_w_eng2 <- mat_backlog_w_eng %>%
+#  select(1:13,17,22:25) %>%
+#  replace_na(list(`Budget Hours` = 0, `Actual Hours` = 0, `Engineering Amt` = 0)) %>%
+#  group_by(Order, Bucket, Division, Region, `Customer Name`, `Project Name`, `Transaction Type`, Complexity) %>%
+#  summarise(tons = round(sum(`Total Tons`),2),
+#            revenue = round(sum(`Backlog Dollars`),2),
+#            margin = round(sum(`Margin with Exch Rate`),2),
+#            budget_hrs = round(mean(`Budget Hours`),2),
+#            actual_hrs_maybe = round(mean(`Actual Hours`),2),
+#            eng_amt_whatdoesthismean = round(mean(`Engineering Amt`),2)) %>%
+#  left_join(pa_exp_all_summary, by = c("Order" = "ORDER_NUMBER")) %>%
+#  replace_na(list(quantity = 0, cost = 0))
+#
+#write.csv(mat_backlog_w_eng2, "~/R/R Data/S&OP/customer_analysis_3_years/mat_backlog_w_eng.csv")  
 
-write.csv(mat_backlog_w_eng2, "~/R/R Data/S&OP/customer_analysis_3_years/mat_backlog_w_eng.csv")  
+backlog_w_complexity <- mat_backlog_w_eng %>%
+  select(Division, 
+         Region, 
+         `Project Manager`, 
+         `Customer Name`,
+         Order,
+         `Order Number`, 
+         `Backlog Dollars`, 
+         `Margin with Exch Rate`, 
+         `Total Tons`,
+         Bucket, 
+         `Record Type`, 
+         `Ordered Date`,
+         `Transaction Type`,
+         Complexity) %>%
+  rename(Project = Order) %>%
+  arrange(Division, Region, `Order Number`)
 
-
-
+write.csv(backlog_w_complexity, "~/R/R Data/S&OP/backlog_w_complexity.csv")

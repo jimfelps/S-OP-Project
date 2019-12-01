@@ -1,0 +1,89 @@
+---
+title: "Engineering Capacity vs Utilization by Office"
+author: "Jim Felps"
+date: "9/27/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyverse)
+
+#month1 <- "SEPT"
+#month2 <- "OCT"
+#month3 <- "NOV"
+#month4 <- "DEC"
+cell_recode <- c(`DVS - 0 to 100 hrs total` = "Simple",
+                 `DS - 100 to 200 hrs total` = "Moderate", 
+                 `DM - 201 to 400 hrs total` = "Complex", 
+                 `DC - 401 to 800 hrs total` = "High Complexity", 
+                 `DHC - 800+ hrs total` = "Very High Complexity", 
+                 `B1 - 0 to 100 hrs total` = "Simple", 
+                 `B2 - 0 to 100 hrs total` = "Simple", 
+                 `B3 - 0 to 100 hrs total` = "Simple", 
+                 `C1 - 100 to 200 hrs total` = "Moderate", 
+                 `D1 - 200 to 400 hrs total` = "Complex", 
+                 `E1 - 400 to 800 hrs total` = "High Complexity", 
+                 `E2 - 400 to 800 hrs total` = "High Complexity", 
+                 `F1 - 800+ hours total` = "Very High Complexity", 
+                 `F2 - 800+ hours total` = "Very High Complexity", 
+                 `F3 - 800+ hours total` = "Very High Complexity", 
+                 `G1 - 400 hrs+ & 6+Mhr/Ton` = "Very High Complexity", 
+                 `R - Roof` = "Roof")
+
+engineering_efficiency_factor_calendar <- read_excel("~/R/R Data/S&OP/customer_analysis_3_years/engineering_efficiency_factor_calendar.xlsx", 
+    col_types = c("numeric", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "numeric", 
+        "text", "numeric", "numeric", "numeric"), 
+    skip = 5)
+
+engineering_hours_by_employee <- read_excel("~/R/R Data/S&OP/customer_analysis_3_years/engineering_hours_by_employee.xlsx", 
+    skip = 5)
+
+
+```
+
+
+```{r}
+
+engineering_lookup <- engineering_efficiency_factor_calendar %>%
+  select(Resource, `Emp. Id`, `Process Group`, Team, total_hours, avail_hours)
+
+engineering_hours_clean <- engineering_hours_by_employee %>%
+  filter(!is.na(`Resource Cell`)) %>%
+  left_join(engineering_lookup, by = c("Emp. Id" = "Emp. Id")) %>%
+  select(-1, -Resource.y) %>%
+  rename(employee_name = 1, hours_assigned = 2, emp_id = 3, cell = 4, process_group = `Process Group`) %>%
+  filter(!is.na(process_group)) %>%
+  select(-emp_id,-hours_assigned)
+
+engineering_hours_clean$cell <- recode(engineering_hours_clean$cell, !!!cell_recode)
+
+engineering_hours_clean$cell <- factor(engineering_hours_clean$cell,
+                                       levels = c("Roof",
+                                             "Simple",
+                                             "Moderate",
+                                             "Complex",
+                                             "High Complexity",
+                                             "Very High Complexity"))
+engineering_hours_clean$process_group <- factor(engineering_hours_clean$process_group,
+                                                levels = c("Design",
+                                                           "Detailing",
+                                                           "Drawings"))
+
+avail_vs_assign <- engineering_hours_clean %>%
+  select(-employee_name) %>%
+  group_by(Team, process_group, cell) %>%
+  summarise_all(funs(sum)) %>%
+  select(Team, process_group, cell, avail_hours, total_hours, everything())
+  
+write.csv(avail_vs_assign, "~/R/R Data/S&OP/customer_analysis_3_years/avail_vs_assign.csv")
+
+```
+
