@@ -6,14 +6,14 @@ Work on datasets for S&amp;OP project analysis
 The idea of an S&OP process seems like more of a business buzz phrase than an actual policy, but once we started to dig into what this process would accomplish, I started to realize that this project could end up being a valuable excercise for the company. The project started with a couple basic requirements:
 
 1. Analyze customer data for the past 6 years and determine if there's a way to segment our customers into a tierred system. We conducted interviews with employees from many different functional areas, as well as the business leaders to determine the most preferred way of segmenting customers. Some of the options included:
- * Revenue
- * Margin
- * Geography
- * Loyalty
- * Stategic (future growth opportunity, earnings potential)
- * Brand
- * Engineering Complexity
- * Other (k-means analysis)
+        * Revenue
+        * Margin
+        * Geography
+        * Loyalty
+        * Stategic (future growth opportunity, earnings potential)
+        * Brand
+        * Engineering Complexity
+        * Other (k-means analysis)
 It was determined that the top 4 would be used, with some sort of score for strategic initiative layered in at a later date potentially. Loyalty will be a difficult item to measure, as we don't really know how many customers are purchasing from our competitors. The sop_customer_analysis_3 years file is the work I've put together for our 6 year analysis (don't let the name fool you, we switched from 3 to 6 years of data in the middle of my work).
 
 2. Determine what KPI's the company should be looking at on a regular basis. These KPI's should tell us a story from the beginning of the pipeline (sales) all the way through the end (MFG). Each KPI should indicate some sort of change in business environment or upcoming internal challenge to the business, whether that be softening economic conditions, a change in the mix of building types that the market is demanding (e.g. small, simple buildings to more complex buildings), or a capacity problem in our production teams.
